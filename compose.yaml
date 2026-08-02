@@ -1,0 +1,26 @@
+services:
+  service-wsmiqakx3ciim6l8mo2ihfrb:
+    build:
+      context: .
+    platform: linux/arm64
+    restart: unless-stopped
+    stop_grace_period: 2m
+    ports:
+      - "16261-16269:16261-16269/udp"
+      - "27015:27015/tcp"
+    environment:
+      CPU_MHZ: ${CPU_MHZ:-2000}
+      SERVER_NAME: ${SERVER_NAME:-Project Zomboid Dedicated Server}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD before running docker compose.}
+    volumes:
+      - zomboid-install:/home/steam/Steam/ProjectZomboid
+      - zomboid-data:/home/steam/Zomboid
+    working_dir: /home/steam/Steam
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - 'FEXBash ./steamcmd.sh +force_install_dir /home/steam/Steam/ProjectZomboid +login anonymous +app_update 380870 validate +quit && /usr/local/bin/adjust-project-zomboid-json.py /home/steam/Steam/ProjectZomboid/ProjectZomboid64.json && exec FEXBash /home/steam/Steam/ProjectZomboid/start-server.sh -servername "$$SERVER_NAME" -adminpassword "$$ADMIN_PASSWORD"'
+
+volumes:
+  zomboid-install:
+  zomboid-data:
