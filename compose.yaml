@@ -1,124 +1,26 @@
 services:
-  service-wsmiqakx3ciim6l8mo2ihfrb:
-    image: teriyakigod/steamcmd:arm64
+  zomboid:
+    image: etheth888/project-zomboid-arm64:main
     platform: linux/arm64
     restart: unless-stopped
     stop_grace_period: 2m
+    stdin_open: true
+    tty: true
     ports:
-      - "16261-16269:16261-16269/udp"
+      - "16261:16261/udp"
+      - "16262:16262/udp"
       - "27015:27015/tcp"
-      - "8766:8766/udp"
-      - "8767:8767/udp"
     environment:
-      CPU_MHZ: ${CPU_MHZ:-2000}
+      ADMIN_PASSWORD: ${SERVICE_PASSWORD_ADMIN}
       SERVER_ID: ${SERVER_ID:-servertest}
-      SERVER_NAME: ${SERVER_NAME:-Project Zomboid Dedicated Server}
-      SERVER_PASSWORD: ${SERVICE_PASSWORD_ZOMBOID}
-      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD before running docker compose.}
     volumes:
-      - zomboid-install:/home/steam/Steam/ProjectZomboid
       - zomboid-data:/home/steam/Zomboid
-    configs:
-      - source: adjust-project-zomboid-json.py
-        target: /usr/local/bin/adjust-project-zomboid-json.py
-    working_dir: /home/steam/Steam
-    entrypoint:
-      - /bin/sh
+    command:
       - -ec
-      - 'FEXBash ./steamcmd.sh +force_install_dir /home/steam/Steam/ProjectZomboid +login anonymous +app_update 380870 validate +quit && python3 /usr/local/bin/adjust-project-zomboid-json.py /home/steam/Steam/ProjectZomboid/ProjectZomboid64.json && exec FEXBash /home/steam/Steam/ProjectZomboid/start-server.sh -servername "$$SERVER_ID" -steamport1 8766 -steamport2 8767 -adminpassword "$$ADMIN_PASSWORD"'
-
-configs:
-  adjust-project-zomboid-json.py:
-    content: |
-      #!/usr/bin/env python3
-      import json
-      import os
-      import re
-      import sys
-      from pathlib import Path
-
-      path = Path(sys.argv[1])
-      required = (
-          "-XX:+UseG1GC",
-          "-Dsun.reflect.noInflation=true",
-          "-Djdk.reflect.useDirectMethodHandle=false",
-          "-XX:CompileCommand=exclude,java/lang/Class,reflectionData",
-      )
-
-      if not path.is_file():
-          raise SystemExit(f"missing expected JSON: {path}")
-
-      try:
-          data = json.loads(path.read_text())
-      except (OSError, json.JSONDecodeError) as error:
-          raise SystemExit(f"cannot read {path}: {error}") from error
-
-      args = data.get("vmArgs")
-      if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
-          raise SystemExit(f"missing string array 'vmArgs' in {path}")
-
-      normalized = []
-      for arg in args:
-          arg = "-XX:+UseG1GC" if arg == "-XX:+UseZGC" else arg
-          if arg not in required or arg not in normalized:
-              normalized.append(arg)
-      normalized.extend(arg for arg in required if arg not in normalized)
-      data["vmArgs"] = normalized
-
-      temporary = path.with_suffix(path.suffix + ".tmp")
-      try:
-          temporary.write_text(json.dumps(data, indent=2) + "\n")
-          temporary.replace(path)
-      except OSError as error:
-          raise SystemExit(f"cannot update {path}: {error}") from error
-
-      server_id = os.environ.get("SERVER_ID", "servertest")
-      if not re.fullmatch(r"[A-Za-z0-9_-]+", server_id):
-          raise SystemExit("invalid SERVER_ID")
-
-      try:
-          server_password = os.environ["SERVER_PASSWORD"]
-          server_name = os.environ["SERVER_NAME"]
-      except KeyError as error:
-          raise SystemExit(f"missing required environment variable: {error.args[0]}") from error
-
-      for name, value in (("SERVER_PASSWORD", server_password), ("SERVER_NAME", server_name)):
-          if "\r" in value or "\n" in value:
-              raise SystemExit(f"invalid {name}")
-
-      target = Path(f"/home/steam/Zomboid/Server/{server_id}.ini")
-      target.parent.mkdir(parents=True, exist_ok=True)
-      values = {
-          "Password": server_password,
-          "Public": "true",
-          "PublicName": server_name,
-          "Open": "true",
-          "SteamPort1": "8766",
-          "SteamPort2": "8767",
-      }
-      order = tuple(values)
-      lines = []
-      seen = set()
-      if target.is_file():
-          for line in target.read_text().splitlines():
-              key, sep, _ = line.partition("=")
-              if sep and key in values:
-                  if key in seen:
-                      continue
-                  lines.append(f"{key}={values[key]}")
-                  seen.add(key)
-                  continue
-              lines.append(line)
-      for key in order:
-          if key not in seen:
-              lines.append(f"{key}={values[key]}")
-      temporary = target.with_name(target.name + ".tmp")
-      try:
-          temporary.write_text("\n".join(lines) + "\n")
-          temporary.replace(target)
-      except OSError as error:
-          raise SystemExit(f"cannot update {target}: {error}") from error
+      - |
+        FEX /home/steam/Steam/steamcmd.sh +force_install_dir /home/steam/Zomboid +login anonymous +app_update 380870 validate +quit
+        sed -i 's/"-XX:+UseZGC"/"-XX:+UseG1GC"/' ProjectZomboid64.json
+        exec FEX ./start-server.sh -servername "$${SERVER_ID}" -adminpassword "$${ADMIN_PASSWORD}"
 
 volumes:
-  zomboid-install:
   zomboid-data:
