@@ -1,7 +1,6 @@
 services:
   service-wsmiqakx3ciim6l8mo2ihfrb:
-    build:
-      context: .
+    image: teriyakigod/steamcmd:arm64
     platform: linux/arm64
     restart: unless-stopped
     stop_grace_period: 2m
@@ -15,11 +14,18 @@ services:
     volumes:
       - zomboid-install:/home/steam/Steam/ProjectZomboid
       - zomboid-data:/home/steam/Zomboid
+    configs:
+      - source: adjust-project-zomboid-json.py
+        target: /usr/local/bin/adjust-project-zomboid-json.py
     working_dir: /home/steam/Steam
     entrypoint:
       - /bin/sh
       - -ec
-      - 'FEXBash ./steamcmd.sh +force_install_dir /home/steam/Steam/ProjectZomboid +login anonymous +app_update 380870 validate +quit && /usr/local/bin/adjust-project-zomboid-json.py /home/steam/Steam/ProjectZomboid/ProjectZomboid64.json && exec FEXBash /home/steam/Steam/ProjectZomboid/start-server.sh -servername "$$SERVER_NAME" -adminpassword "$$ADMIN_PASSWORD"'
+      - 'FEXBash ./steamcmd.sh +force_install_dir /home/steam/Steam/ProjectZomboid +login anonymous +app_update 380870 validate +quit && python3 /usr/local/bin/adjust-project-zomboid-json.py /home/steam/Steam/ProjectZomboid/ProjectZomboid64.json && exec FEXBash /home/steam/Steam/ProjectZomboid/start-server.sh -servername "$$SERVER_NAME" -adminpassword "$$ADMIN_PASSWORD"'
+
+configs:
+  adjust-project-zomboid-json.py:
+    file: ./adjust-project-zomboid-json.py
 
 volumes:
   zomboid-install:
