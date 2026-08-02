@@ -7,9 +7,13 @@ services:
     ports:
       - "16261-16269:16261-16269/udp"
       - "27015:27015/tcp"
+      - "8766:8766/udp"
+      - "8767:8767/udp"
     environment:
       CPU_MHZ: ${CPU_MHZ:-2000}
+      SERVER_ID: ${SERVER_ID:-servertest}
       SERVER_NAME: ${SERVER_NAME:-Project Zomboid Dedicated Server}
+      SERVER_PASSWORD: ${SERVICE_PASSWORD_ZOMBOID}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD before running docker compose.}
     volumes:
       - zomboid-install:/home/steam/Steam/ProjectZomboid
@@ -21,13 +25,15 @@ services:
     entrypoint:
       - /bin/sh
       - -ec
-      - 'FEXBash ./steamcmd.sh +force_install_dir /home/steam/Steam/ProjectZomboid +login anonymous +app_update 380870 validate +quit && python3 /usr/local/bin/adjust-project-zomboid-json.py /home/steam/Steam/ProjectZomboid/ProjectZomboid64.json && exec FEXBash /home/steam/Steam/ProjectZomboid/start-server.sh -servername "$$SERVER_NAME" -adminpassword "$$ADMIN_PASSWORD"'
+      - 'FEXBash ./steamcmd.sh +force_install_dir /home/steam/Steam/ProjectZomboid +login anonymous +app_update 380870 validate +quit && python3 /usr/local/bin/adjust-project-zomboid-json.py /home/steam/Steam/ProjectZomboid/ProjectZomboid64.json && exec FEXBash /home/steam/Steam/ProjectZomboid/start-server.sh -servername "$$SERVER_ID" -steamport1 8766 -steamport2 8767 -adminpassword "$$ADMIN_PASSWORD"'
 
 configs:
   adjust-project-zomboid-json.py:
     content: |
       #!/usr/bin/env python3
       import json
+      import os
+      import re
       import sys
       from pathlib import Path
 
@@ -65,6 +71,53 @@ configs:
           temporary.replace(path)
       except OSError as error:
           raise SystemExit(f"cannot update {path}: {error}") from error
+
+      server_id = os.environ.get("SERVER_ID", "servertest")
+      if not re.fullmatch(r"[A-Za-z0-9_-]+", server_id):
+          raise SystemExit("invalid SERVER_ID")
+
+      try:
+          server_password = os.environ["SERVER_PASSWORD"]
+          server_name = os.environ["SERVER_NAME"]
+      except KeyError as error:
+          raise SystemExit(f"missing required environment variable: {error.args[0]}") from error
+
+      for name, value in (("SERVER_PASSWORD", server_password), ("SERVER_NAME", server_name)):
+          if "\r" in value or "\n" in value:
+              raise SystemExit(f"invalid {name}")
+
+      target = Path(f"/home/steam/Zomboid/Server/{server_id}.ini")
+      target.parent.mkdir(parents=True, exist_ok=True)
+      values = {
+          "Password": server_password,
+          "Public": "true",
+          "PublicName": server_name,
+          "Open": "true",
+          "SteamPort1": "8766",
+          "SteamPort2": "8767",
+      }
+      order = tuple(values)
+      lines = []
+      seen = set()
+      if target.is_file():
+          for line in target.read_text().splitlines():
+              key, sep, _ = line.partition("=")
+              if sep and key in values:
+                  if key in seen:
+                      continue
+                  lines.append(f"{key}={values[key]}")
+                  seen.add(key)
+                  continue
+              lines.append(line)
+      for key in order:
+          if key not in seen:
+              lines.append(f"{key}={values[key]}")
+      temporary = target.with_name(target.name + ".tmp")
+      try:
+          temporary.write_text("\n".join(lines) + "\n")
+          temporary.replace(target)
+      except OSError as error:
+          raise SystemExit(f"cannot update {target}: {error}") from error
 
 volumes:
   zomboid-install:
