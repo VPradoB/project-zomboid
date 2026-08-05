@@ -17,6 +17,7 @@
 		"-XX:-UseCompressedOops",
 		"-XX:TieredStopAtLevel=1",
 		"-XX:CompileCommand=exclude,zombie/core/skinnedmodel/advancedanimation/IAnimationVariableRegistry.setVariable",
+		"-XX:CompileCommand=exclude,java/lang/Class.getPackage",
 		"-XX:-OmitStackTraceInFastThrow"
 	]
 }
