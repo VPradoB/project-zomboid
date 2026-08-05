@@ -1,0 +1,196 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+PZ_USER=${PZ_USER:-zomboid}
+PZ_HOME=${PZ_HOME:-/home/zomboid}
+PZ_MODS=${PZ_MODS:-$PZ_HOME/Zomboid/mods}
+PZ_INI=${PZ_INI:-$PZ_HOME/Zomboid/Server/${SERVER_ID:-servertest}.ini}
+PZ_DD=${PZ_DD:-/opt/depotdownloader/DepotDownloader}
+tmp_root=
+staged_path=
+config_tmp=
+mods_value=
+
+usage() {
+  cat <<'EOF'
+Usage:
+  pzctl add <Workshop URL|ID>
+  pzctl list
+  pzctl remove <mod-id>
+
+Mods are installed locally. Players manually subscribe to the printed Workshop link.
+Changes require restarting the container via Coolify. Coolify owns lifecycle and logs.
+EOF
+}
+
+die() { printf 'pzctl: %s\n' "$*" >&2; exit 1; }
+
+cleanup() {
+  [[ -z "$config_tmp" ]] || rm -f -- "$config_tmp"
+  [[ -z "$staged_path" ]] || rm -rf -- "$staged_path"
+  [[ -z "$tmp_root" ]] || rm -rf -- "$tmp_root"
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+trap 'exit 129' HUP
+
+valid_workshop_id() { [[ "$1" =~ ^[0-9]{6,20}$ ]]; }
+valid_mod_id() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+@-]*$ ]]; }
+valid_basename() { [[ "$1" =~ ^[A-Za-z0-9][A-Za-z0-9._+@\ -]*$ ]]; }
+
+workshop_id() {
+  local input=$1 id id_re='(^|[?&])id=([0-9]{6,20})($|[&])'
+  if valid_workshop_id "$input"; then
+    printf '%s\n' "$input"
+    return
+  fi
+  [[ "$input" =~ ^https?://(www\.)?steamcommunity\.com/sharedfiles/filedetails/\? ]] || return 1
+  [[ "$input" =~ $id_re ]] || return 1
+  id=${BASH_REMATCH[2]}
+  valid_workshop_id "$id" && printf '%s\n' "$id"
+}
+
+as_zomboid() {
+  if (( EUID == 0 )); then
+    install -d -o "$PZ_USER" -g "$PZ_USER" "$PZ_MODS" "$(dirname "$PZ_INI")"
+    exec setpriv --reuid="$PZ_USER" --regid="$PZ_USER" --init-groups \
+      env HOME="$PZ_HOME" SERVER_ID="${SERVER_ID:-servertest}" PZ_USER="$PZ_USER" \
+      PZ_HOME="$PZ_HOME" PZ_MODS="$PZ_MODS" PZ_INI="$PZ_INI" PZ_DD="$PZ_DD" "$0" "$@"
+  fi
+}
+
+read_mods() {
+  mods_value=
+  [[ -f "$PZ_INI" ]] || return 0
+  mods_value=$(awk '
+    /^Mods=/ {
+      count=split(substr($0, 6), ids, ";")
+      for (i=1; i<=count; i++) {
+        if (ids[i] != "" && !seen[ids[i]]++) value=value (value == "" ? "" : ";") ids[i]
+      }
+    }
+    END { print value }
+  ' "$PZ_INI") || return
+  write_mods "$mods_value"
+}
+
+write_mods() {
+  local value=$1 dir
+  dir=$(dirname "$PZ_INI")
+  mkdir -p -- "$dir" || return
+  config_tmp=$(mktemp "$dir/.pzctl.ini.XXXXXX") || return
+  awk -v value="$value" '
+    /^Mods=/ { if (!found) print "Mods=" value; found=1; next }
+    { print }
+    END { if (!found) print "Mods=" value }
+  ' "$([[ -f "$PZ_INI" ]] && printf '%s' "$PZ_INI" || printf /dev/null)" > "$config_tmp" || return
+  chmod 600 "$config_tmp" || return
+  mv -f -- "$config_tmp" "$PZ_INI" || return
+  config_tmp=
+}
+
+append_mods() {
+  local current id item
+  read_mods
+  current=$mods_value
+  for id in "$@"; do
+    for item in ${current//;/ }; do [[ "$item" == "$id" ]] && continue 2; done
+    current="${current:+$current;}$id"
+  done
+  write_mods "$current"
+}
+
+resolve_workshop() {
+  local id=$1 page=$tmp_root/collection.html
+  curl -fsSL --max-time 25 -A 'Mozilla/5.0' \
+    "https://steamcommunity.com/sharedfiles/filedetails/?id=$id" -o "$page" \
+    || die "could not read Workshop item $id"
+  if grep -q 'class="collectionItem"' "$page"; then
+    grep -oE 'sharedfile_[0-9]+' "$page" | grep -oE '[0-9]+' | sort -u | grep -v -x "$id" > "$tmp_root/items" || true
+    [[ -s "$tmp_root/items" ]] || die "collection $id contains no Workshop items"
+  else
+    printf '%s\n' "$id" > "$tmp_root/items"
+  fi
+}
+
+install_item() {
+  local wid=$1 item_dir=$tmp_root/item-$wid mods_dir root base info mod_id
+  local -n installed_ref=$2
+  mkdir -- "$item_dir"
+  "$PZ_DD" -app 108600 -pubfile "$wid" -dir "$item_dir" >/dev/null \
+    || die "DepotDownloader failed for Workshop item $wid"
+
+  mods_dir=$(find "$item_dir" -type d -name mods -print -quit)
+  [[ -n "$mods_dir" ]] || return
+  while IFS= read -r -d '' root; do
+    base=${root##*/}
+    valid_basename "$base" || die "unsafe mod directory name: $base"
+    info=$root/mod.info
+    if [[ ! -f "$info" ]]; then
+      info=$(find "$root" -mindepth 2 -maxdepth 2 -type f -name mod.info -print -quit)
+    fi
+    [[ -n "$info" && -f "$info" ]] || continue
+    mod_id=$(awk -F= '/^id=/{sub(/\r$/, "", $0); print substr($0,4); exit}' "$info")
+    valid_mod_id "$mod_id" || die "invalid mod id in $info"
+    [[ -z ${installed_ref[$mod_id]+x} ]] || continue
+
+    staged_path=$(mktemp -d "$PZ_MODS/.pzctl.XXXXXX")
+    cp -a -- "$root" "$staged_path/$base"
+    rm -rf -- "$PZ_MODS/$base"
+    mv -- "$staged_path/$base" "$PZ_MODS/$base"
+    rmdir -- "$staged_path"
+    staged_path=
+    installed_ref[$mod_id]=1
+    printf 'Installed %s\n' "$mod_id"
+  done < <(find "$mods_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+}
+
+add() {
+  local source_id wid
+  declare -A installed=()
+  source_id=$(workshop_id "${1:-}") || die 'expected a Steam Workshop URL or numeric ID'
+  tmp_root=$(mktemp -d)
+  resolve_workshop "$source_id"
+  while IFS= read -r wid; do
+    valid_workshop_id "$wid" || die "invalid Workshop item ID: $wid"
+    install_item "$wid" installed
+  done < "$tmp_root/items"
+  (( ${#installed[@]} > 0 )) || die 'download contained no valid mod roots'
+  append_mods "${!installed[@]}"
+  printf 'Players must subscribe: https://steamcommunity.com/sharedfiles/filedetails/?id=%s\n' "$source_id"
+  printf 'Restart the container from Coolify to apply changes.\n'
+}
+
+list_mods() {
+  local current item
+  read_mods
+  current=$mods_value
+  [[ -n "$current" ]] || { printf '(none)\n'; return; }
+  while IFS= read -r item; do [[ -z "$item" ]] || printf '%s\n' "$item"; done <<< "${current//;/$'\n'}"
+}
+
+remove_mod() {
+  local target=${1:-} current item new= found=0
+  valid_mod_id "$target" || die 'invalid mod id'
+  read_mods
+  current=$mods_value
+  while IFS= read -r item; do
+    [[ -z "$item" ]] && continue
+    if [[ "$item" == "$target" ]]; then found=1; continue; fi
+    new="${new:+$new;}$item"
+  done <<< "${current//;/$'\n'}"
+  (( found )) || die "mod is not active: $target"
+  write_mods "$new"
+  printf 'Deactivated %s; files kept in %s.\n' "$target" "$PZ_MODS"
+  printf 'Restart the container from Coolify to apply changes.\n'
+}
+
+as_zomboid "$@"
+case ${1:-help} in
+  add) [[ $# == 2 ]] || die 'usage: pzctl add <Workshop URL|ID>'; add "$2" ;;
+  list) [[ $# == 1 ]] || die 'usage: pzctl list'; list_mods ;;
+  remove) [[ $# == 2 ]] || die 'usage: pzctl remove <mod-id>'; remove_mod "$2" ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 1 ;;
+esac

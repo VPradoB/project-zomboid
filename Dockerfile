@@ -29,7 +29,7 @@ FROM ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e8
 
 RUN test "$(dpkg --print-architecture)" = arm64 \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ciopfs fuse3 iproute2 libice6 libsm6 libx11-6 libxext6 tini util-linux \
+    && apt-get install -y --no-install-recommends ca-certificates ciopfs curl fuse3 iproute2 libice6 libsm6 libx11-6 libxext6 tini util-linux \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --shell /bin/bash zomboid \
     && mkdir -p /opt/zomboid-server /home/zomboid/Zomboid \
@@ -40,6 +40,7 @@ COPY --from=box64-builder /out/ /
 COPY ProjectZomboid64.json /usr/local/share/zomboid/ProjectZomboid64.json
 COPY --chmod=755 entrypoint.sh /usr/local/bin/zomboid-entrypoint
 COPY --chmod=755 java-wrapper.sh /usr/local/bin/java
+COPY --chmod=755 pzctl /usr/local/bin/pzctl
 
 ENV BOX64_DYNAREC_STRONGMEM=3 \
     BOX64_DYNAREC_SAFEFLAGS=2 \
