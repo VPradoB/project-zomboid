@@ -1,26 +1,27 @@
 services:
   zomboid:
-    image: etheth888/project-zomboid-arm64:main
+    build:
+      context: .
+    image: project-zomboid-arm64:local
     platform: linux/arm64
     restart: unless-stopped
     stop_grace_period: 2m
-    stdin_open: true
-    tty: true
     ports:
       - "16261:16261/udp"
-      - "16262:16262/udp"
-      - "27015:27015/tcp"
     environment:
       ADMIN_PASSWORD: ${SERVICE_PASSWORD_ADMIN}
+      RAM_GB: ${RAM_GB:-8}
       SERVER_ID: ${SERVER_ID:-servertest}
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
     volumes:
-      - zomboid-data:/home/steam/Zomboid
-    command:
-      - -ec
-      - |
-        FEX /home/steam/Steam/steamcmd.sh +force_install_dir /home/steam/Zomboid +login anonymous +app_update 380870 validate +quit
-        sed -i 's/"-XX:+UseZGC"/"-XX:+UseG1GC"/' ProjectZomboid64.json
-        exec FEX ./start-server.sh -servername "$${SERVER_ID}" -adminpassword "$${ADMIN_PASSWORD}"
+      - zomboid-server:/opt/zomboid-server
+      - zomboid-data:/home/zomboid/Zomboid
 
 volumes:
+  zomboid-server:
   zomboid-data:
