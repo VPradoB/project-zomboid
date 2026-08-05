@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 install_dir=/opt/zomboid-server
 data_dir=/home/zomboid/Zomboid
+server_dir="$data_dir/Server"
 workshop="$install_dir/steamapps/workshop/content/108600"
 workshop_store="${workshop}.ci"
 console="$data_dir/server-console.txt"
@@ -27,9 +28,22 @@ RAM_GB=${RAM_GB:-8}
 SERVER_ID=${SERVER_ID:-servertest}
 [[ "$RAM_GB" =~ ^[0-9]+$ ]] && (( RAM_GB >= 2 )) || { echo 'RAM_GB must be an integer of at least 2' >&2; exit 1; }
 [[ "$SERVER_ID" =~ ^[A-Za-z0-9_-]+$ ]] || { echo 'SERVER_ID may only contain letters, numbers, underscores, and hyphens' >&2; exit 1; }
+server_ini="$server_dir/$SERVER_ID.ini"
 
 mkdir -p "$install_dir" "$data_dir"
 chown zomboid:zomboid "$install_dir" "$data_dir"
+install -d -o zomboid -g zomboid "$server_dir"
+server_ini_tmp=$(mktemp "$server_dir/.${SERVER_ID}.ini.XXXXXX")
+trap 'rm -f -- "$server_ini_tmp"' EXIT
+awk '
+  /^UPnP=/ { if (!found) { print "UPnP=false"; found=1 }; next }
+  { print }
+  END { if (!found) print "UPnP=false" }
+' "$([[ -f "$server_ini" ]] && printf %s "$server_ini" || printf /dev/null)" > "$server_ini_tmp"
+chown zomboid:zomboid "$server_ini_tmp"
+chmod 600 "$server_ini_tmp"
+mv -f -- "$server_ini_tmp" "$server_ini"
+trap - EXIT
 setpriv --reuid=zomboid --regid=zomboid --init-groups env HOME=/home/zomboid \
   /opt/depotdownloader/DepotDownloader -app 380870 -branch unstable -os linux -dir "$install_dir"
 
