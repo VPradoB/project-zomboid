@@ -46,7 +46,7 @@ ciopfs -o allow_other "$workshop_store" "$workshop"
 mountpoint -q "$workshop" || { echo 'ciopfs mount failed; /dev/fuse and SYS_ADMIN are required' >&2; exit 1; }
 
 cd "$install_dir"
-export PATH="$install_dir/jre64/bin:$PATH"
+export PATH="/usr/local/bin:$install_dir/jre64/bin:$PATH"
 export BOX64_LD_LIBRARY_PATH="$install_dir/linux64:$install_dir/natives:$install_dir:$install_dir/jre64/lib/amd64"
 export BOX64_LD_PRELOAD=libjsig.so
 attempt=0
