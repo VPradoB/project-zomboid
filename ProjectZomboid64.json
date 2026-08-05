@@ -15,9 +15,7 @@
 		"-Djava.security.egd=file:/dev/urandom",
 		"-XX:+UseSerialGC",
 		"-XX:-UseCompressedOops",
-		"-XX:TieredStopAtLevel=1",
-		"-XX:CompileCommand=exclude,zombie/core/skinnedmodel/advancedanimation/IAnimationVariableRegistry.setVariable",
-		"-XX:CompileCommand=exclude,java/lang/Class.getPackage",
+		"-Xint",
 		"-XX:-OmitStackTraceInFastThrow"
 	]
 }
