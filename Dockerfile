@@ -31,7 +31,7 @@ RUN test "$(dpkg --print-architecture)" = arm64 \
     && apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates ciopfs fuse3 iproute2 tini util-linux \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd --create-home --uid 1000 --shell /bin/bash zomboid \
+    && useradd --create-home --shell /bin/bash zomboid \
     && mkdir -p /opt/zomboid-server /home/zomboid/Zomboid \
     && chown -R zomboid:zomboid /opt/zomboid-server /home/zomboid
 
