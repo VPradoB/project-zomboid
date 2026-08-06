@@ -10,6 +10,7 @@ services:
       - "16261-16269:16261-16269/udp"
     environment:
       ADMIN_PASSWORD: ${SERVICE_PASSWORD_ADMIN}
+      PZ_JAVA_MODE: ${PZ_JAVA_MODE:-arm64}
       RAM_GB: ${RAM_GB:-8}
       SERVER_ID: ${SERVER_ID:-servertest}
     cap_add:

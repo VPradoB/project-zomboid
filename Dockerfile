@@ -25,6 +25,8 @@ RUN test "$(dpkg --print-architecture)" = arm64 \
     && cmake --build /tmp/box64/build --parallel "$(nproc)" \
     && DESTDIR=/out cmake --install /tmp/box64/build
 
+FROM azul/zulu-openjdk:25-jre@sha256:1eebabd95ecc8bec2639f330043cba5f11bfb10193e33af017c209bd441efe96 AS native-jre
+
 FROM ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
 
 RUN test "$(dpkg --print-architecture)" = arm64 \
@@ -37,10 +39,15 @@ RUN test "$(dpkg --print-architecture)" = arm64 \
 
 COPY --from=depotdownloader /opt/depotdownloader /opt/depotdownloader
 COPY --from=box64-builder /out/ /
+COPY --from=native-jre /usr/lib/jvm/zulu25 /opt/zulu25
 COPY ProjectZomboid64.json /usr/local/share/zomboid/ProjectZomboid64.json
 COPY --chmod=755 entrypoint.sh /usr/local/bin/zomboid-entrypoint
 COPY --chmod=755 java-wrapper.sh /usr/local/bin/java
 COPY --chmod=755 pzctl /usr/local/bin/pzctl
+
+RUN test "$(dpkg --print-architecture)" = arm64 \
+    && /opt/zulu25/bin/java -version 2>&1 | grep -q '25\.0\.3' \
+    && /opt/zulu25/bin/java -XshowSettings:properties -version 2>&1 | grep -q 'os.arch = aarch64'
 
 ENV BOX64_DYNAREC_STRONGMEM=3 \
     BOX64_DYNAREC_SAFEFLAGS=2 \
