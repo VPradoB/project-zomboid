@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     stop_grace_period: 2m
     ports:
-      - "16261:16261/udp"
+      - "16261-16269:16261-16269/udp"
     environment:
       ADMIN_PASSWORD: ${SERVICE_PASSWORD_ADMIN}
       RAM_GB: ${RAM_GB:-8}
